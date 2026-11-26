@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Brick Scale Converter</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f6f5f1;--card:#fff;--ink:#1d1d1b;--mut:#6b6a64;--line:#dedcd3;--acc:#1d1d1b;--acc2:#fff;--res:#f1efe6;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161615;--card:#212120;--ink:#f0eee6;--mut:#9b9a92;--line:#38372f;--acc:#f0eee6;--acc2:#161615;--res:#2a2a27;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#161615;--card:#212120;--ink:#f0eee6;--mut:#9b9a92;--line:#38372f;--acc:#f0eee6;--acc2:#161615;--res:#2a2a27;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:760px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:4px 0 12px}
+.bar,.tabs{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.bar{padding:0 0 12px}
+.tabs{gap:20px;border-bottom:1px solid var(--line);margin-bottom:4px}
+.tab{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;color:var(--mut);padding:8px 0;cursor:pointer;font:inherit}
+.tab.on{color:var(--ink);border-bottom-color:var(--ink)}
+.card{border-bottom:1px solid var(--line);padding:12px 0}
+input,select,button{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 8px;min-width:0}
+input[type=number],input.n{width:96px}
+input.t{border:0;background:transparent;font-weight:600;width:100%}
+label{color:var(--mut);font-size:13px;display:flex;gap:6px;align-items:center}
+button{cursor:pointer}button.p{background:var(--acc);color:var(--acc2);border-color:var(--acc)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}
+.res{padding:6px 0;margin-top:4px;font-variant-numeric:tabular-nums}
+.res b{font-size:17px}.mut{color:var(--mut);font-size:13px}
+.wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:560px}
+td,th{padding:6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;font-size:14px}
+th{color:var(--mut);font-weight:500}
+.hide{display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>Brick Scale Converter</h1>
+<div class="bar">
+  <label>Scale 1:<input class="n" id="sf" value="110" inputmode="decimal"></label>
+  <select id="sop"><option value="divide">Divide (real → model)</option><option value="multiply">Multiply</option></select>
+  <label>Decimals <input class="n" style="width:56px" id="dp" type="number" min="0" max="8" value="3"></label>
+</div>
+<div class="bar" id="proj">
+  <input id="pname" placeholder="Project name" style="width:150px">
+  <button id="psave">Save project</button>
+  <label>Load <input type="file" id="pload" accept=".txt"></label>
+  <span class="mut" id="pmsg"></span>
+</div>
+<div class="tabs" id="tabs"></div>
+
+<section id="convert"></section>
+
+<section id="finder" class="hide">
+  <div class="card">
+    <div class="row"><b>Real</b><input class="n" id="fr" value="10.1"><select id="fru"></select></div>
+    <div class="row"><b>Model</b><input class="n" id="fm" value="14"><select id="fmu"></select></div>
+    <div class="res" id="fres"></div>
+    <div class="row"><button class="p" id="useScale">Use as global scale</button></div>
+  </div>
+</section>
+
+<section id="image" class="hide">
+  <div class="card">
+    <div class="row"><input type="file" id="imgf" accept="image/*"><label>Real total height <input class="n" id="imh" value="110.6"> m</label></div>
+    <div class="mut" id="imhint">Upload a side-on rocket image. Click the top of the rocket, then the bottom, then each place you want to split a stage.</div>
+    <div class="row"><button id="imundo">Undo last mark</button><button id="imreset">Reset marks</button></div>
+    <div style="position:relative;display:inline-block;max-width:100%"><img id="imimg" alt="Uploaded rocket" style="max-width:100%;max-height:70vh;display:none;cursor:crosshair"><div id="imov" style="position:absolute;inset:0;pointer-events:none"></div></div>
+  </div>
+  <div class="card wrap"><table><thead><tr><th>Stage (1 = bottom)</th><th>Real height</th><th>Share</th><th>Model height</th></tr></thead><tbody id="imrows"></tbody></table></div>
+</section>
+
+
+</main>
+<script>
+const U={mm:1,cm:10,m:1000,km:1e6,in:25.4,ft:304.8,mi:1609344,studs:8,bricks:9.6,plates:3.2};
+const L={mm:'mm',cm:'cm',m:'m',km:'km',in:'in',ft:'ft',mi:'mi',studs:'studs',bricks:'stacked bricks',plates:'stacked plates'};
+const opts=(sel)=>Object.keys(U).map(k=>`<option value="${k}"${k===sel?' selected':''}>${L[k]}</option>`).join('');
+let S={sf:'110',op:'divide',dp:3,tab:'convert',
+ rows:[{t:'Rocket height',a:'110.6',au:'m',b:'',bu:'cm',out:'bricks',rem:'plates',inv:false}]};
+try{const x=JSON.parse(localStorage.getItem('brickconv')||'null');if(x)S=Object.assign(S,x)}catch(e){}
+if(S.tab==='rocket')S.tab='convert';
+const save=()=>{try{localStorage.setItem('brickconv',JSON.stringify(S))}catch(e){}};
+const $=id=>document.getElementById(id);
+const ev=s=>{s=String(s||'').trim();if(!s)return 0;if(!/^[0-9+\-*/().\s]*$/.test(s))return NaN;try{return Function('"use strict";return ('+s+')')()}catch(e){return NaN}};
+const f=(n,d=S.dp)=>isFinite(n)?String(+n.toFixed(d)):'—';
+const factor=()=>{const v=ev(S.sf);return v>0?v:1};
+const scaled=(mm,inv=false)=>{const x=factor(),dv=S.op==='divide';return (dv!==inv)?mm/x:mm*x};
+const bp=mm=>{let b=Math.floor(mm/9.6+1e-9),p=(mm-b*9.6)/3.2;if(p>2.9999){b++;p=0}return `${b} bricks + ${f(p)} plates`};
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+
+// tabs
+const TABS=[['convert','Convert'],['image','Image split'],['finder','Scale finder']];
+function showTab(){
+  $('tabs').innerHTML=TABS.map(([k,v])=>`<button class="tab${S.tab===k?' on':''}" data-t="${k}">${v}</button>`).join('');
+  TABS.forEach(([k])=>$(k).classList.toggle('hide',S.tab!==k));
+  $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{S.tab=b.dataset.t;save();showTab()});
+}
+
+// convert
+function buildConvert(){
+  $('convert').innerHTML=S.rows.map((r,i)=>`<div class="card" data-i="${i}">
+   <div class="row"><input class="t" data-k="t" value="${esc(r.t)}"><button data-del="${i}" title="Remove">✕</button></div>
+   <div class="row"><input class="n" data-k="a" value="${esc(r.a)}" inputmode="decimal"><select data-k="au">${opts(r.au)}</select>
+     <span class="mut">+</span><input class="n" data-k="b" value="${esc(r.b)}" inputmode="decimal"><select data-k="bu">${opts(r.bu)}</select></div>
+   <div class="row"><span class="mut">→</span><select data-k="out">${opts(r.out)}</select><span class="mut">remainder in</span><select data-k="rem">${opts(r.rem)}</select>
+     <label><input type="checkbox" data-k="inv" ${r.inv?'checked':''}>model → real</label></div>
+   <div class="res" id="res${i}"></div></div>`).join('')+'<button id="addRow">+ Add conversion</button>';
+  $('convert').querySelectorAll('[data-k]').forEach(el=>{
+    const i=+el.closest('.card').dataset.i,k=el.dataset.k;
+    el.oninput=el.onchange=()=>{S.rows[i][k]=el.type==='checkbox'?el.checked:el.value;save();calcConvert()};
+  });
+  $('convert').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{S.rows.splice(+b.dataset.del,1);save();buildConvert()});
+  $('addRow').onclick=()=>{S.rows.push({t:'New conversion',a:'',au:'m',b:'',bu:'cm',out:'studs',rem:'plates',inv:false});save();buildConvert()};
+  calcConvert();
+}
+function calcConvert(){
+  S.rows.forEach((r,i)=>{
+    const mm=ev(r.a)*U[r.au]+ev(r.b)*U[r.bu], sc=scaled(mm,r.inv), o=sc/U[r.out];
+    let main;
+    if(!isFinite(o)) main='—';
+    else{const w=Math.trunc(o),rm=(o-w)*U[r.out]/U[r.rem];main=`<b>${f(w,0)} ${L[r.out]}</b> + <b>${f(rm)} ${L[r.rem]}</b>`}
+    $('res'+i).innerHTML=`${main}<div class="mut">Exact: ${f(o)} ${L[r.out]} · ${f(sc)} mm${(r.out==='bricks'||r.out==='plates')&&isFinite(sc)?' · '+bp(sc):''}</div>`;
+  });
+}
+
+// finder
+function calcFinder(){
+  const r=ev($('fr').value)*U[$('fru').value],m=ev($('fm').value)*U[$('fmu').value],x=r/m;
+  $('fres').innerHTML=isFinite(x)&&x>0?`<b>Scale 1:${f(x,2)}</b><div class="mut">Use "divide" with ${f(x,2)}. A 10% larger or smaller model is 1:${f(x*1.1,1)} / 1:${f(x/1.1,1)}.</div>`:'Enter two valid numbers.';
+  calcFinder.x=x;
+}
+
+// image split
+const IM={ys:[],st:[]};
+function calcImage(){
+  const ys=IM.ys,H=ev($('imh').value);
+  $('imov').innerHTML=ys.map((y,i)=>`<div style="position:absolute;left:0;right:0;top:${y*100}%;border-top:2px ${i<2?'solid #d6001c':'dashed #0a84ff'}"><span style="position:absolute;right:2px;top:2px;font-size:11px;background:#000a;color:#fff;padding:0 4px;border-radius:4px">${i===0?'top':i===1?'bottom':'split '+(i-1)}</span></div>`).join('');
+  IM.st=[];
+  if(ys.length<2||!(H>0)){$('imrows').innerHTML='<tr><td colspan="4" class="mut">Mark the top and bottom to see stages.</td></tr>';return}
+  const a=Math.min(ys[0],ys[1]),b=Math.max(ys[0],ys[1]);
+  const d=ys.slice(2).map(y=>Math.min(b,Math.max(a,y))).sort((p,q)=>p-q);
+  const bd=[a,...d,b],n=bd.length-1;
+  let html='';
+  for(let i=0;i<n;i++){
+    const share=(bd[i+1]-bd[i])/(b-a),h=share*H,no=n-i;
+    IM.st.push({n:'Stage '+no,h:+h.toFixed(3)});
+    html+=`<tr><td>Stage ${no}</td><td>${f(h,2)} m</td><td>${f(share*100,1)}%</td><td>${bp(scaled(h*1000))}<div class="mut">${f(scaled(h*1000),1)} mm</div></td></tr>`;
+  }
+  $('imrows').innerHTML=html;
+}
+const setImg=u=>{const im=$('imimg');im.src=u;im.style.display='block';IM.img=u};
+$('imgf').onchange=e=>{const fl=e.target.files[0];if(!fl)return;const i=new Image();i.onload=()=>{const k=Math.min(1,1400/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=Math.round(i.width*k);c.height=Math.round(i.height*k);const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(i,0,0,c.width,c.height);setImg(c.toDataURL('image/jpeg',.85));IM.ys=[];calcImage()};i.src=URL.createObjectURL(fl)};
+$('imimg').onclick=e=>{const r=e.currentTarget.getBoundingClientRect();IM.ys.push(Math.min(1,Math.max(0,(e.clientY-r.top)/r.height)));calcImage()};
+$('imundo').onclick=()=>{IM.ys.pop();calcImage()};
+$('imreset').onclick=()=>{IM.ys=[];calcImage()};
+$('imh').value=S.imh||'110.6';
+$('imh').oninput=()=>{S.imh=$('imh').value;save();calcImage()};
+
+// project save / load
+const b64=u=>{let s='';for(let i=0;i<u.length;i+=8192)s+=String.fromCharCode.apply(null,u.subarray(i,i+8192));return btoa(s)};
+const unb64=t=>Uint8Array.from(atob(t),c=>c.charCodeAt(0));
+const pack=obj=>'BRICKPRJ1:'+b64(new TextEncoder().encode(JSON.stringify(obj)));
+function unpack(t){
+  t=t.trim();
+  if(!t.startsWith('BRICKPRJ1:'))throw new Error('This isn\u2019t a project file.');
+  return JSON.parse(new TextDecoder().decode(unb64(t.slice(10))));
+}
+let dl=null;
+if(window.claude&&claude.use)claude.use('downloads').then(d=>{dl=d}).catch(()=>{});
+const msg=t=>{$('pmsg').textContent=t};
+$('pname').value=S.name||'';
+$('pname').oninput=e=>{S.name=e.target.value;save()};
+$('psave').onclick=async()=>{
+  try{
+    const data={v:1,name:S.name||'',sf:S.sf,op:S.op,dp:S.dp,rows:S.rows,imh:$('imh').value,ys:IM.ys,img:IM.img||''};
+    const text=pack(data);
+    if(!dl){msg('Saving files isn\u2019t available in this view.');return}
+    const fn=((S.name||'brick-project').trim().replace(/[^\w\-]+/g,'-').replace(/^-+|-+$/g,'')||'brick-project')+'.txt';
+    await dl.save({filename:fn,data:text});
+    msg('Project saved.');
+  }catch(e){msg(e&&e.code==='declined'?'Save cancelled.':'Couldn\u2019t save: '+(e.message||e))}
+};
+$('pload').onchange=async e=>{
+  const fl=e.target.files[0];if(!fl)return;
+  try{
+    const d=unpack(await fl.text());
+    S.name=d.name||'';S.sf=String(d.sf??S.sf);S.op=d.op||S.op;S.dp=d.dp??S.dp;S.rows=Array.isArray(d.rows)?d.rows:S.rows;S.imh=d.imh||S.imh;
+    $('pname').value=S.name;$('sf').value=S.sf;$('sop').value=S.op;$('dp').value=S.dp;$('imh').value=S.imh||'110.6';
+    IM.ys=Array.isArray(d.ys)?d.ys:[];
+    if(d.img&&String(d.img).startsWith('data:image/'))setImg(d.img);else{IM.img='';$('imimg').style.display='none'}
+    save();buildConvert();calcImage();msg('Project loaded.');
+  }catch(err){msg(err.message||'Couldn\u2019t load that file.')}
+  e.target.value='';
+};
+
+// init
+$('sf').value=S.sf;$('sop').value=S.op;$('dp').value=S.dp;
+const refreshAll=()=>{calcConvert();calcImage();};
+$('sf').oninput=e=>{S.sf=e.target.value;save();refreshAll()};
+$('sop').onchange=e=>{S.op=e.target.value;save();refreshAll()};
+$('dp').oninput=e=>{S.dp=Math.min(8,Math.max(0,+e.target.value||0));save();refreshAll()};
+$('fru').innerHTML=opts('m');$('fmu').innerHTML=opts('studs');
+['fr','fru','fm','fmu'].forEach(id=>$(id).oninput=$(id).onchange=calcFinder);
+$('useScale').onclick=()=>{const x=calcFinder.x;if(x>0){S.op='divide';S.sf=String(+x.toFixed(2));$('sf').value=S.sf;$('sop').value='divide';save();refreshAll()}};
+showTab();buildConvert();calcFinder();calcImage();
+</script>
+</body>
+</html>
